@@ -1,0 +1,6 @@
+{
+  "name": "Study Genius",
+  "description": "An interactive academic learning cockpit featuring course organization, a materials summarizer, custom solutions guides, dynamic test prep, vocabulary flashcards, and a contextual study companion.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

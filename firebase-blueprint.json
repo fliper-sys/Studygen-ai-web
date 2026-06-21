@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "User": {
+      "properties": {
+        "uid": "string",
+        "email": "string",
+        "courses": "array",
+        "studentStreak": "number",
+        "createdAt": "string"
+      }
+    },
+    "Goal": {
+      "properties": {
+        "id": "string",
+        "text": "string",
+        "completed": "boolean",
+        "userId": "string",
+        "createdAt": "string"
+      }
+    },
+    "Assignment": {
+      "properties": {
+        "id": "string",
+        "courseName": "string",
+        "title": "string",
+        "questions": "string",
+        "solution": "string",
+        "style": "string",
+        "userId": "string",
+        "createdAt": "string"
+      }
+    },
+    "Summary": {
+      "properties": {
+        "id": "string",
+        "courseName": "string",
+        "title": "string",
+        "summaryText": "string",
+        "chapters": "array",
+        "flashcards": "array",
+        "quiz": "array",
+        "userId": "string",
+        "createdAt": "string"
+      }
+    },
+    "QuizHistory": {
+      "properties": {
+        "id": "string",
+        "courseName": "string",
+        "quizTitle": "string",
+        "score": "number",
+        "total": "number",
+        "userId": "string",
+        "date": "string"
+      }
+    }
+  },
+  "firestore": {
+    "users": {
+      "entity": "User",
+      "path": "/users/{uid}"
+    },
+    "goals": {
+      "entity": "Goal",
+      "path": "/users/{uid}/goals/{goalId}"
+    },
+    "assignments": {
+      "entity": "Assignment",
+      "path": "/users/{uid}/assignments/{assignmentId}"
+    },
+    "summaries": {
+      "entity": "Summary",
+      "path": "/users/{uid}/summaries/{summaryId}"
+    },
+    "quizHistory": {
+      "entity": "QuizHistory",
+      "path": "/users/{uid}/quizHistory/{quizHistoryId}"
+    }
+  }
+}

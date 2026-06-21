@@ -1,0 +1,134 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE SECURITY HIGHER-ORDER FUNCTIONS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.\\%]+$');
+    }
+
+    // --- ENTITY LEVEL SCHEMAS ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'courses', 'studentStreak', 'createdAt'])
+        && data.keys().size() == 5
+        && data.uid is string && data.uid.size() <= 128
+        && data.email is string && data.email.size() <= 200
+        && data.courses is list && data.courses.size() <= 50
+        && data.studentStreak is number && data.studentStreak >= 0 && data.studentStreak <= 3650
+        && data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidGoal(data) {
+      return data.keys().hasAll(['id', 'text', 'completed', 'userId', 'createdAt'])
+        && data.keys().size() == 5
+        && data.id is string && data.id.size() <= 128
+        && data.text is string && data.text.size() <= 500
+        && data.completed is bool
+        && data.userId is string && data.userId == request.auth.uid
+        && data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidAssignment(data) {
+      return data.keys().hasAll(['id', 'courseName', 'title', 'questions', 'solution', 'style', 'userId', 'createdAt'])
+        && data.keys().size() == 8
+        && data.id is string && data.id.size() <= 128
+        && data.courseName is string && data.courseName.size() <= 100
+        && data.title is string && data.title.size() <= 200
+        && data.questions is string && data.questions.size() <= 5000
+        && data.solution is string && data.solution.size() <= 20000
+        && data.style is string && data.style.size() <= 50
+        && data.userId is string && data.userId == request.auth.uid
+        && data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidSummary(data) {
+      return data.keys().hasAll(['id', 'courseName', 'title', 'summaryText', 'chapters', 'flashcards', 'quiz', 'userId', 'createdAt'])
+        && data.keys().size() == 9
+        && data.id is string && data.id.size() <= 128
+        && data.courseName is string && data.courseName.size() <= 100
+        && data.title is string && data.title.size() <= 200
+        && data.summaryText is string && data.summaryText.size() <= 100000
+        && data.chapters is list && data.chapters.size() <= 100
+        && data.flashcards is list && data.flashcards.size() <= 100
+        && data.quiz is list && data.quiz.size() <= 100
+        && data.userId is string && data.userId == request.auth.uid
+        && data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    function isValidQuizHistory(data) {
+      return data.keys().hasAll(['id', 'courseName', 'quizTitle', 'score', 'total', 'userId', 'date'])
+        && data.keys().size() == 7
+        && data.id is string && data.id.size() <= 128
+        && data.courseName is string && data.courseName.size() <= 100
+        && data.quizTitle is string && data.quizTitle.size() <= 200
+        && data.score is number && data.score >= 0 && data.score <= 100
+        && data.total is number && data.total >= 0 && data.total <= 100
+        && data.userId is string && data.userId == request.auth.uid
+        && data.date is string && data.date.size() <= 50;
+    }
+
+    // --- COLLECTION PATH MATCHERS ---
+
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(uid) && isValidUser(incoming());
+      allow update: if isOwner(uid) && isValidUser(incoming());
+      allow delete: if false; // Users can't be deleted via client SDK
+
+      match /goals/{goalId} {
+        allow read, write: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(goalId) && isValidGoal(incoming());
+        allow update: if isOwner(uid) && isValidId(goalId) && isValidGoal(incoming());
+        allow delete: if isOwner(uid);
+      }
+
+      match /assignments/{assignmentId} {
+        allow read, write: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(assignmentId) && isValidAssignment(incoming());
+        allow update: if isOwner(uid) && isValidId(assignmentId) && isValidAssignment(incoming());
+        allow delete: if isOwner(uid);
+      }
+
+      match /summaries/{summaryId} {
+        allow read, write: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(summaryId) && isValidSummary(incoming());
+        allow update: if isOwner(uid) && isValidId(summaryId) && isValidSummary(incoming());
+        allow delete: if isOwner(uid);
+      }
+
+      match /quizHistory/{quizHistoryId} {
+        allow read: if isSignedIn();
+        allow write: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidId(quizHistoryId) && isValidQuizHistory(incoming());
+        allow update: if isOwner(uid) && isValidId(quizHistoryId) && isValidQuizHistory(incoming());
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    match /{path=**}/quizHistory/{quizHistoryId} {
+      allow read: if isSignedIn();
+    }
+  }
+}
