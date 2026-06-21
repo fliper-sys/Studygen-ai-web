@@ -3,6 +3,9 @@ import { auth, db } from './firebase';
 import { onAuthStateChanged, User as FBUser } from 'firebase/auth';
 import { doc, getDoc, setDoc, deleteDoc, updateDoc, collection, onSnapshot, collectionGroup } from 'firebase/firestore';
 import { AuthWidget } from './components/AuthWidget';
+import { OnboardingScreen } from './components/OnboardingScreen';
+import { GuidedTour } from './components/GuidedTour';
+import { jsPDF } from 'jspdf';
 import {
   BookOpen,
   GraduationCap,
@@ -38,7 +41,8 @@ import {
   Grid,
   Layers,
   MessageSquare,
-  Users
+  Users,
+  Download
 } from 'lucide-react';
 
 // Type Declarations
@@ -290,6 +294,8 @@ Equation: $\\Delta x \\cdot \\Delta p \\ge \\frac{\\hbar}{2}$.
 export default function App() {
   // Authentication State
   const [currentUser, setCurrentUser] = useState<FBUser | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => !localStorage.getItem('sg_onboarded'));
+  const [isTourActive, setIsTourActive] = useState<boolean>(false);
 
   // Navigation State
   const [activeTab, setActiveTab] = useState<'dashboard' | 'summarizer' | 'homework' | 'quiz' | 'flashcards'>('dashboard');
@@ -774,6 +780,224 @@ export default function App() {
     }
   };
 
+  const handleDownloadPDF = () => {
+    if (!activeSummary) return;
+
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - (margin * 2);
+
+    let posY = 20;
+
+    const checkPageOverflow = (neededHeight: number) => {
+      if (posY + neededHeight > pageHeight - margin) {
+        doc.addPage();
+        posY = margin;
+        drawHeader();
+      }
+    };
+
+    const drawHeader = () => {
+      // Top fine line accent
+      doc.setDrawColor(99, 102, 241); // indigo-500
+      doc.setLineWidth(0.5);
+      doc.line(margin, margin - 8, pageWidth - margin, margin - 8);
+
+      // Header text
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text('STUDY GENIUS • CO-COGNITIVE SYLLABUS DIRECTORY', margin, margin - 11);
+    };
+
+    // Draw initial page decoration
+    drawHeader();
+
+    // Document Title
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.setTextColor(15, 23, 42); // slate-900
+    const titleLines = doc.splitTextToSize(activeSummary.title, contentWidth);
+    doc.text(titleLines, margin, posY);
+    posY += (titleLines.length * 8) + 6;
+
+    // Metadata block
+    doc.setFont('Helvetica', 'oblique');
+    doc.setFontSize(10);
+    doc.setTextColor(99, 102, 241); // indigo-500
+    doc.text(`Active Study Deck: ${activeCourse}`, margin, posY);
+    posY += 8;
+
+    // Horizontal divider
+    doc.setDrawColor(226, 232, 240); // slate-200
+    doc.setLineWidth(0.2);
+    doc.line(margin, posY, pageWidth - margin, posY);
+    posY += 10;
+
+    // Core Executive Summary Section
+    checkPageOverflow(40);
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.text('I. Executive Summary Outlines', margin, posY);
+    posY += 8;
+
+    doc.setFont('Helvetica', 'normal');
+    doc.setFontSize(10.5);
+    doc.setTextColor(71, 85, 105); // slate-600
+    const summaryLines = doc.splitTextToSize(activeSummary.summaryText, contentWidth);
+    doc.text(summaryLines, margin, posY, { align: 'justify', maxWidth: contentWidth });
+    posY += (summaryLines.length * 5) + 15;
+
+    // Lesson Chapters Section
+    checkPageOverflow(30);
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.text('II. Structured Lesson Chapters', margin, posY);
+    posY += 8;
+
+    activeSummary.chapters.forEach((chap, idx) => {
+      // Format title
+      checkPageOverflow(20);
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(79, 70, 229); // indigo-600
+      doc.text(`Chapter ${idx + 1}: ${chap.title}`, margin, posY);
+      posY += 6;
+
+      // Format outlines / content
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(71, 85, 105); // slate-600
+
+      chap.outline.forEach(bullet => {
+        // Clean md bold patterns for simple standard strings
+        const cleanBullet = bullet.replace(/\*\*/g, '');
+        const bulletLines = doc.splitTextToSize(`• ${cleanBullet}`, contentWidth - 4);
+        checkPageOverflow(bulletLines.length * 5 + 2);
+        doc.text(bulletLines, margin + 4, posY);
+        posY += (bulletLines.length * 5) + 1;
+      });
+
+      posY += 2; // small spacer between lists
+
+      // Chapter takeaways
+      if (chap.takeaways) {
+        const cleanTakeaways = chap.takeaways.replace(/\*\*/g, '');
+        const takeawayLines = doc.splitTextToSize(`Takeaway Key: ${cleanTakeaways}`, contentWidth - 8);
+        checkPageOverflow(takeawayLines.length * 4.5 + 8);
+        
+        // Background block
+        doc.setFillColor(248, 250, 252); // slate-50
+        doc.rect(margin, posY, contentWidth, (takeawayLines.length * 4.5) + 6, 'F');
+        
+        doc.setFont('Helvetica', 'oblique');
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105); // slate-600
+        doc.text(takeawayLines, margin + 4, posY + 4);
+        posY += (takeawayLines.length * 4.5) + 12;
+      } else {
+        posY += 4;
+      }
+    });
+
+    // Appendix / Flashcards Section
+    if (activeSummary.flashcards && activeSummary.flashcards.length > 0) {
+      checkPageOverflow(30);
+      posY += 4;
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(30, 41, 59); // slate-800
+      doc.text('III. Glossary & Vocabulary Index', margin, posY);
+      posY += 8;
+
+      activeSummary.flashcards.forEach((card, idx) => {
+        const termLine = `${idx + 1}. ${card.term}:`;
+        const defClean = card.definition.replace(/\*\*/g, '');
+        const defLines = doc.splitTextToSize(defClean, contentWidth - 30);
+        const neededHeight = Math.max(6, defLines.length * 4.5) + 4;
+        checkPageOverflow(neededHeight);
+
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(30, 41, 59); // slate-850
+        doc.text(termLine, margin, posY);
+
+        doc.setFont('Helvetica', 'normal');
+        doc.setFontSize(9.5);
+        doc.setTextColor(71, 85, 105); // slate-650
+        doc.text(defLines, margin + 30, posY);
+        posY += Math.max(6, defLines.length * 4.5) + 4;
+      });
+    }
+
+    // Quiz diagnostic catalog
+    if (activeSummary.quiz && activeSummary.quiz.length > 0) {
+      checkPageOverflow(35);
+      posY += 6;
+      doc.setFont('Helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(30, 41, 59); // slate-800
+      doc.text('IV. Syllabus Diagnostic Study Guide', margin, posY);
+      posY += 8;
+
+      activeSummary.quiz.forEach((q, idx) => {
+        const questionText = `Q${idx + 1}: ${q.question}`;
+        const questionLines = doc.splitTextToSize(questionText, contentWidth);
+        checkPageOverflow(questionLines.length * 5 + 15);
+
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(15, 23, 42); // slate-900
+        doc.text(questionLines, margin, posY);
+        posY += (questionLines.length * 5) + 2;
+
+        // Print correct solution index or option
+        const correctOptionText = `Correct Key Option: ${q.options[q.correctIndex]}`;
+        const explanationLines = q.explanation ? doc.splitTextToSize(`Rational Proof: ${q.explanation.replace(/\*\*/g, '')}`, contentWidth - 6) : [];
+        checkPageOverflow(8 + explanationLines.length * 4.5);
+
+        doc.setFont('Helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(16, 185, 129); // emerald-600
+        doc.text(correctOptionText, margin, posY);
+        posY += 5;
+
+        if (q.explanation) {
+          doc.setFont('Helvetica', 'normal');
+          doc.setFontSize(8.5);
+          doc.setTextColor(100, 116, 139); // slate-500
+          doc.text(explanationLines, margin + 4, posY);
+          posY += (explanationLines.length * 4.5) + 6;
+        } else {
+          posY += 3;
+        }
+      });
+    }
+
+    // Double check footer page counts on all generated pages and write pages
+    const totalPagesCount = doc.internal.pages.length - 1;
+    for (let i = 1; i <= totalPagesCount; i++) {
+      doc.setPage(i);
+      doc.setFont('Helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184); // slate-400
+      doc.text(`Page ${i} of ${totalPagesCount}`, pageWidth - margin - 18, pageHeight - margin + 10);
+    }
+
+    // Trigger Local Save Instantly
+    const safeTitle = activeSummary.title.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    doc.save(`${safeTitle}_syllabus_guide.pdf`);
+  };
+
   const handleFlashcardTouchStart = (e: React.TouchEvent) => {
     const touch = e.touches[0];
     touchStartX.current = touch.clientX;
@@ -1224,8 +1448,55 @@ export default function App() {
     }
   };
 
+  const skipQuizQuestion = async () => {
+    if (currentQuizIndex + 1 < activeQuizQuestions.length) {
+      setCurrentQuizIndex(prev => prev + 1);
+      setSelectedQuizOption(null);
+      setQuizSubmitted(false);
+    } else {
+      setQuizCompleted(true);
+      const newRecord: QuizHistoryRecord = {
+        id: 'qhist_' + Date.now(),
+        courseName: activeCourse,
+        quizTitle: activeSummary?.title || 'Course Concept Diagnostic',
+        score: quizScore,
+        total: activeQuizQuestions.length,
+        date: new Date().toLocaleDateString()
+      };
+
+      if (currentUser) {
+        try {
+          await setDoc(doc(db, `users/${currentUser.uid}/quizHistory`, newRecord.id), {
+            ...newRecord,
+            userId: currentUser.uid
+          });
+
+          await updateDoc(doc(db, 'users', currentUser.uid), {
+            studentStreak: studentStreak + 1
+          });
+        } catch (err) {
+          console.error("Cloud action quiz saving failed: ", err);
+        }
+      } else {
+        const updated = [newRecord, ...quizHistory];
+        setQuizHistory(updated);
+        saveHistoryToStorage(updated);
+
+        setStudentStreak(prev => prev + 1);
+        saveStreakToStorage(studentStreak + 1);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0A0B0D] text-slate-100 flex flex-col font-sans select-none antialiased relative pb-28">
+      {/* Onboarding Screen Overlays */}
+      {showOnboarding && (
+        <OnboardingScreen onComplete={() => { setShowOnboarding(false); setIsTourActive(true); }} />
+      )}
+
+      {/* Guided Tour Spotlight */}
+      <GuidedTour isActive={isTourActive} onTourClose={() => setIsTourActive(false)} />
       
       {/* GLOWING AMBIENT BACKGROUNDS AND SHADOW FLARES MIMICKING ORIGINAL SCREEN LENS */}
       <div className="absolute top-[-100px] left-[50%] -translate-x-1/2 w-[600px] h-[600px] bg-indigo-500/[0.04] blur-[150px] rounded-full pointer-events-none z-0" />
@@ -1236,7 +1507,11 @@ export default function App() {
       <header className="sticky top-0 z-35 bg-[#0B0C0F]/85 backdrop-blur-xl border-b border-white/[0.03] px-5 py-4 flex justify-between items-center shadow-lg transition-all">
         <div className="flex items-center gap-3">
           {/* User Profile Avatar with custom initials or dynamic status */}
-          <div className="relative group cursor-pointer">
+          <div 
+            onClick={() => setActiveNavTab('profile')}
+            title="Manage sync account & profile"
+            className="relative group cursor-pointer"
+          >
             <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-600 via-violet-500 to-amber-400 p-[1.5px] shadow-lg shadow-indigo-500/10 active:scale-95 transition-all">
               <div className="w-full h-full rounded-full bg-slate-950 flex items-center justify-center">
                 <span className="font-display text-sm font-extrabold text-white tracking-tight">
@@ -1260,7 +1535,7 @@ export default function App() {
         </div>
 
         {/* ACTIVE DECK SELECTOR (High Fidelity Pill Capsule) */}
-        <div className="flex items-center">
+        <div id="course-deck-selector" className="flex items-center">
           <div className="bg-[#13151A] hover:bg-[#1A1D24] border border-white/[0.05] shadow-inner px-3.5 py-1.5 rounded-full text-xs font-bold font-display text-indigo-400 cursor-pointer flex items-center gap-1.5 transition-all">
             <BookOpen className="w-3.5 h-3.5 shrink-0" />
             <select
@@ -1510,15 +1785,37 @@ export default function App() {
           {/* ============================================================== */}
           {activeNavTab === 'profile' && (
             <div className="space-y-6 animate-fade-in">
-              <div className="border-b border-white/[0.03] pb-4">
-                <h2 className="font-display text-2xl font-extrabold text-white tracking-tight">Identity & Achievements Cockpit</h2>
-                <p className="text-slate-400 text-xs font-semibold font-sans mt-1">Manage subjects, checklist goals, your learning streak and live network ranking scoreboards.</p>
+              <div className="border-b border-white/[0.03] pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h2 className="font-display text-2xl font-extrabold text-white tracking-tight">Identity & Achievements Cockpit</h2>
+                  <p className="text-slate-400 text-xs font-semibold font-sans mt-1">Manage subjects, checklist goals, your learning streak and live network ranking scoreboards.</p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('sg_onboarded');
+                      setShowOnboarding(true);
+                    }}
+                    className="cursor-pointer bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/20 hover:border-indigo-500 text-[10.5px] font-bold px-3 py-1.5 rounded-lg transition-all animate-pulse"
+                  >
+                    Replay Onboarding
+                  </button>
+                  <button
+                    onClick={() => setIsTourActive(true)}
+                    className="cursor-pointer bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-[10.5px] font-bold px-3 py-1.5 rounded-lg transition-all"
+                  >
+                    Guided Tour
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
                 {/* Left side: Subjects Organizer & Streak metrics */}
                 <div className="lg:col-span-1 space-y-6">
+                  
+                  {/* Authentication & Account Sync Card */}
+                  <AuthWidget currentUser={currentUser} />
                   
                   {/* Subject deck manager card */}
                   <div className="bg-[#13151A]/90 border border-white/[0.04] rounded-2xl p-5 shadow-xl space-y-4 font-display">
@@ -1574,7 +1871,7 @@ export default function App() {
                   </div>
 
                   {/* Consistency streak card */}
-                  <div className="bg-[#13151A]/90 border border-white/[0.04] rounded-2xl p-5 shadow-xl space-y-4 font-display">
+                  <div id="student-streak-badge" className="bg-[#13151A]/90 border border-white/[0.04] rounded-2xl p-5 shadow-xl space-y-4 font-display">
                     <div className="flex items-center gap-2">
                       <div className="w-9 h-9 rounded-xl bg-orange-500/10 flex items-center justify-center border border-orange-500/20">
                         <Zap className="w-4.5 h-4.5 text-orange-400 shrink-0" />
@@ -1836,7 +2133,7 @@ export default function App() {
               </div>
 
               {/* THREE TAB CHANNEL INGEST BOX */}
-              <div className="bg-[#0B0F19]/40 backdrop-blur-md border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
+              <div id="summarizer-intake-upload" className="bg-[#0B0F19]/40 backdrop-blur-md border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
                 
                 {/* Visual tabs select */}
                 <div className="flex border-b border-slate-800 pb-2">
@@ -2014,13 +2311,22 @@ export default function App() {
                   <div className="bg-[#0b0f19]/60 backdrop-blur-md border border-slate-800 rounded-3xl p-6.5 shadow-2xl space-y-3">
                     <div className="flex justify-between items-start gap-3 flex-wrap">
                       <h3 className="text-xl font-extrabold text-white">{activeSummary.title}</h3>
-                      <button
-                        onClick={triggerQuizStart}
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all scale-hover cursor-pointer flex items-center gap-1.5"
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        Take Practice Diagnostic Test
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={handleDownloadPDF}
+                          className="bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-300 hover:text-white border border-indigo-500/20 hover:border-indigo-500 text-xs font-bold px-4 py-2 rounded-xl transition-all scale-hover cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Download PDF
+                        </button>
+                        <button
+                          onClick={triggerQuizStart}
+                          className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all scale-hover cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Zap className="w-3.5 h-3.5" />
+                          Take Practice Diagnostic Test
+                        </button>
+                      </div>
                     </div>
                     <p className="text-slate-300 text-xs md:text-sm leading-relaxed max-w-4xl bg-slate-950/40 p-4 border border-slate-850 rounded-2xl">{activeSummary.summaryText}</p>
                   </div>
@@ -2076,7 +2382,7 @@ export default function App() {
               </div>
 
               {/* INPUT FORM BLOCK */}
-              <div className="bg-[#0B0F19]/40 backdrop-blur-md border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
+              <div id="assignments-solver-panel" className="bg-[#0B0F19]/40 backdrop-blur-md border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
@@ -2288,18 +2594,25 @@ export default function App() {
               {activeQuizQuestions.length > 0 ? (
                 <div className="max-w-2xl mx-auto space-y-4">
                   
-                  {/* Progress Indicator */}
-                  <div className="flex justify-between items-center text-xs text-slate-400 px-1">
-                    <span>Question {currentQuizIndex + 1} of {activeQuizQuestions.length}</span>
-                    <span>Correct Score Metrics: {quizScore} Completed</span>
-                  </div>
+                  {/* High Fidelity Progress Indicator Header Capsule */}
+                  <div className="bg-[#13151A]/80 border border-white/[0.04] rounded-2xl p-4 shadow-xl space-y-3">
+                    <div className="flex justify-between items-center text-xs px-1">
+                      <span className="text-slate-400 font-semibold font-sans">
+                        Diagnostic Progression: <strong className="text-white font-bold">{quizCompleted ? activeQuizQuestions.length : currentQuizIndex + 1}</strong> of <strong className="text-slate-200 font-bold">{activeQuizQuestions.length}</strong>
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-slate-400 font-medium">Accumulating score: <strong className="text-emerald-400 font-extrabold">{quizScore}</strong> correct</span>
+                      </div>
+                    </div>
 
-                  {/* Progress scale */}
-                  <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden">
-                    <div
-                      className="bg-indigo-500 h-full transition-all duration-300"
-                      style={{ width: `${((currentQuizIndex + (quizCompleted ? 1 : 0)) / activeQuizQuestions.length) * 100}%` }}
-                    />
+                    {/* Accurate Progress track */}
+                    <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-white/[0.03] p-[1px]">
+                      <div
+                        className="bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 h-full rounded-full transition-all duration-500 ease-out shadow-inner"
+                        style={{ width: `${((quizCompleted ? activeQuizQuestions.length : currentQuizIndex) / activeQuizQuestions.length) * 100}%` }}
+                      />
+                    </div>
                   </div>
 
                   {/* QUIZ COMPLETED FINAL SCREEN */}
@@ -2398,26 +2711,39 @@ export default function App() {
                       )}
 
                       {/* Controls submission */}
-                      <div className="flex justify-end pt-2 border-t border-slate-900/60">
-                        {!quizSubmitted ? (
-                          <button
-                            onClick={submitQuizAnswer}
-                            disabled={selectedQuizOption === null}
-                            className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-xs font-bold px-6 py-2.5 rounded-xl scale-hover cursor-pointer"
-                          >
-                            Verify Answer
-                          </button>
-                        ) : (
-                          <button
-                            onClick={advanceQuiz}
-                            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-6 py-2.5 rounded-xl scale-hover flex items-center gap-1.5 cursor-pointer"
-                          >
-                            <span>
-                              {currentQuizIndex + 1 === activeQuizQuestions.length ? 'Evaluate Results' : 'Next Diagnostic Point'}
-                            </span>
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        )}
+                      <div className="flex justify-between items-center pt-2 border-t border-slate-900/60 gap-3">
+                        <div>
+                          {!quizSubmitted && (
+                            <button
+                              onClick={skipQuizQuestion}
+                              className="bg-slate-950/40 hover:bg-slate-900 text-slate-400 hover:text-white border border-slate-850 px-4 py-2.5 rounded-xl transition-all scale-hover cursor-pointer text-xs font-semibold"
+                            >
+                              Skip Question
+                            </button>
+                          )}
+                        </div>
+
+                        <div>
+                          {!quizSubmitted ? (
+                            <button
+                              onClick={submitQuizAnswer}
+                              disabled={selectedQuizOption === null}
+                              className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white text-xs font-bold px-6 py-2.5 rounded-xl scale-hover cursor-pointer"
+                            >
+                              Verify Answer
+                            </button>
+                          ) : (
+                            <button
+                              onClick={advanceQuiz}
+                              className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-6 py-2.5 rounded-xl scale-hover flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <span>
+                                {currentQuizIndex + 1 === activeQuizQuestions.length ? 'Evaluate Results' : 'Next Diagnostic Point'}
+                              </span>
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                     </div>
@@ -2470,6 +2796,7 @@ export default function App() {
 
                   {/* ROTATING 3D COMPONENT WITH PERSPECTIVE */}
                   <div
+                    id="flashcard-swipe-glossary"
                     onTouchStart={handleFlashcardTouchStart}
                     onTouchMove={handleFlashcardTouchMove}
                     onTouchEnd={() => handleFlashcardTouchEnd(activeSummary.flashcards.length)}
